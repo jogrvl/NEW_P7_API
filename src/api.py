@@ -15,30 +15,46 @@ THRESHOLD_METIER = 0.54
 BASE_DIR = os.path.dirname(__file__)
 MODEL_PATH = os.path.join(BASE_DIR, "..", "modele_pipeline.pkl")
 DATA_PATH = os.path.join(BASE_DIR, "..", "train_df_cleaned.csv")
+
+# URL Google Drive (ID valide)
 DRIVE_DOWNLOAD_URL = (
-    "https://drive.google.com/file/d/1LU8YL8FxHkYSCyG3cwQsguLcufz_Fm-J/view?usp=drive_link"
+    "https://drive.google.com/uc?export=download&id=1LU8YL8FxHkYSCyG3cwQsguLcufz_Fm-J"
 )
 
+
 # -----------------------------
-# Télécharger automatiquement le CSV si absent
+# Téléchargement gros fichier Google Drive
 # -----------------------------
+def download_big_file_from_google_drive(url, destination):
+    """Télécharge un gros fichier Google Drive (avec token de confirmation)."""
+    session = requests.Session()
+    response = session.get(url, stream=True)
+
+    # Chercher le token de confirmation (nécessaire pour les gros fichiers)
+    for key, value in response.cookies.items():
+        if key.startswith("download_warning"):
+            confirm_url = url + "&confirm=" + value
+            response = session.get(confirm_url, stream=True)
+            break
+
+    with open(destination, "wb") as f:
+        for chunk in response.iter_content(32768):
+            if chunk:
+                f.write(chunk)
+
+
 def download_csv_if_needed():
+    """Télécharge le CSV si non présent localement."""
     if os.path.exists(DATA_PATH):
         return
 
     print("➡ Téléchargement du dataset depuis Google Drive...")
-    response = requests.get(DRIVE_DOWNLOAD_URL, stream=True)
-    response.raise_for_status()
-
-    with open(DATA_PATH, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-
+    download_big_file_from_google_drive(DRIVE_DOWNLOAD_URL, DATA_PATH)
     print("✔ train_df_cleaned.csv téléchargé")
 
 
 download_csv_if_needed()
+
 
 # -----------------------------
 # Chargement pipeline + données
@@ -58,13 +74,16 @@ df_clients.set_index("SK_ID_CURR", inplace=True)
 # Colonnes utilisées par le modèle
 ALL_COLUMNS = pipe.feature_names_in_
 
+
 # -----------------------------
 # FastAPI
 # -----------------------------
 app = FastAPI(title="API Scoring Crédit P7", version="1.0")
 
+
 class ClientRequest(BaseModel):
     SK_ID_CURR: int
+
 
 # -----------------------------
 # Routes
@@ -73,22 +92,23 @@ class ClientRequest(BaseModel):
 def root():
     return {"message": "API Scoring Crédit - OK"}
 
+
 @app.post("/predict")
 def predict(request: ClientRequest):
 
     client_id = request.SK_ID_CURR
 
-    # Vérifier si le client est connu
+    # Vérifier si le client existe
     if client_id not in df_clients.index:
         raise HTTPException(
             status_code=404,
             detail=f"Client {client_id} non trouvé dans la base."
         )
 
-    # Récupérer les données existantes
+    # Récupération des données du client
     client_data = df_clients.loc[client_id].to_dict()
 
-    # Compléter toutes les colonnes attendues par le pipeline
+    # Préparation des features attendues par le modèle
     full_input = {col: 0.0 for col in ALL_COLUMNS}
     for col in client_data:
         if col in ALL_COLUMNS:
@@ -96,7 +116,7 @@ def predict(request: ClientRequest):
 
     df_input = pd.DataFrame([full_input])
 
-    # Calcul prédiction
+    # Prédiction
     proba = float(pipe.predict_proba(df_input)[0][1])
     decision = int(proba > THRESHOLD_METIER)
 
