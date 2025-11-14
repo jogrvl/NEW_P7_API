@@ -65,6 +65,7 @@ if not os.path.exists(MODEL_PATH):
 pipe = joblib.load(MODEL_PATH)
 
 df_clients = pd.read_csv(DATA_PATH)
+print("Colonnes trouvées dans le CSV :", df_clients.columns.tolist())
 
 if "SK_ID_CURR" not in df_clients.columns:
     raise KeyError("❌ La colonne 'SK_ID_CURR' est manquante dans train_df_cleaned.csv")
