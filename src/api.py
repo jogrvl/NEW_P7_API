@@ -16,7 +16,7 @@ BASE_DIR = os.path.dirname(__file__)
 MODEL_PATH = os.path.join(BASE_DIR, "..", "modele_pipeline.pkl")
 DATA_PATH = os.path.join(BASE_DIR, "..", "train_df_cleaned.csv")
 DRIVE_DOWNLOAD_URL = (
-    "https://drive.google.com/uc?export=download&id=1pOgCnUZYEmmhevjbj2jBQU2Tre0uhUG6"
+    "https://drive.google.com/file/d/1LU8YL8FxHkYSCyG3cwQsguLcufz_Fm-J/view?usp=drive_link"
 )
 
 # -----------------------------
