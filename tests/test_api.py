@@ -1,11 +1,10 @@
-# src/api.py
+# src/test_api.py
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import pandas as pd
 import joblib
 import os
-import requests
 
 # -----------------------------
 # Paramètres
@@ -17,67 +16,45 @@ BASE_DIR = os.path.dirname(__file__)
 # Pipeline
 MODEL_PATH = os.path.join(BASE_DIR, "..", "modele_pipeline.pkl")
 
-# 👉 Nouveau : on utilise un sample local pour GitHub
+# 👉 Toujours utiliser le sample dans CI / Render
 LOCAL_SAMPLE_PATH = os.path.join(BASE_DIR, "data", "train_df_sample.csv")
 
-# 👉 Fichier complet (Render ou local hors GitHub)
+# 👉 Dataset complet uniquement en local
 FULL_DATA_PATH = os.path.join(BASE_DIR, "..", "train_df_cleaned.csv")
 
-# URL Google Drive
-DRIVE_DOWNLOAD_URL = (
-    "https://drive.google.com/uc?export=download&id=1LU8YL8FxHkYSCyG3cwQsguLcufz_Fm-J"
-)
-
 
 # -----------------------------
-# Téléchargement Google Drive
+# Chargement Dataset
 # -----------------------------
-def download_big_file_from_google_drive(url, destination):
-    session = requests.Session()
-    response = session.get(url, stream=True)
-
-    for key, value in response.cookies.items():
-        if key.startswith("download_warning"):
-            confirm_url = url + "&confirm=" + value
-            response = session.get(confirm_url, stream=True)
-            break
-
-    with open(destination, "wb") as f:
-        for chunk in response.iter_content(32768):
-            if chunk:
-                f.write(chunk)
-
-
 def load_dataset():
     """
-    Charge le dataset selon le contexte :
-      1. Si le sample existe → on l'utilise (GitHub Actions)
-      2. Sinon si le full existe → on le charge (local)
-      3. Sinon → télécharger depuis Google Drive (Render)
+    Logique simple et fiable :
+    1. Si train_df_sample.csv existe → on l’utilise (GitHub Actions / Render)
+    2. Sinon si train_df_cleaned.csv existe → on l’utilise (local)
+    3. Sinon → erreur claire (plus de Google Drive !)
     """
 
-    # 1. Sample présent → PRIORITAIRE pour GitHub Actions
+    # 1 → SAMPLE PRIORITAIRE (CI / Render)
     if os.path.exists(LOCAL_SAMPLE_PATH):
-        print("➡ Chargement du SAMPLE local (GitHub Actions)")
+        print("➡ Chargement du SAMPLE local")
         return pd.read_csv(LOCAL_SAMPLE_PATH)
 
-    # 2. Full dataset local
+    # 2 → Full dataset pour travail local
     if os.path.exists(FULL_DATA_PATH):
         print("➡ Chargement du dataset complet local")
         return pd.read_csv(FULL_DATA_PATH)
 
-    # 3. Render → téléchargement automatique
-    print("➡ Téléchargement du dataset complet depuis Google Drive...")
-    download_big_file_from_google_drive(DRIVE_DOWNLOAD_URL, FULL_DATA_PATH)
-    print("✔ Dataset complet téléchargé")
-    return pd.read_csv(FULL_DATA_PATH)
+    # 3 → Aucun fichier → erreur volontaire
+    raise FileNotFoundError(
+        "❌ Aucun dataset trouvé. Ajoutez train_df_sample.csv dans src/data/."
+    )
 
 
 # -----------------------------
 # Chargement modèle + données
 # -----------------------------
 if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError("❌ modele_pipeline.pkl introuvable à la racine du projet.")
+    raise FileNotFoundError("❌ modele_pipeline.pkl est introuvable à la racine du projet.")
 
 pipe = joblib.load(MODEL_PATH)
 
@@ -116,6 +93,7 @@ def predict(request: ClientRequest):
 
     client_data = df_clients.loc[client_id].to_dict()
 
+    # Remplit toutes les features (certaines peuvent manquer dans le sample)
     full_input = {col: 0.0 for col in ALL_COLUMNS}
     for col in client_data:
         if col in ALL_COLUMNS:
@@ -130,5 +108,5 @@ def predict(request: ClientRequest):
         "client_id": client_id,
         "score_probabilite": round(proba, 4),
         "decision": "Refusé" if decision == 1 else "Approuvé",
-        "seuil": THRESHOLD_METIER
+        "seuil": THRESHOLD_METIER,
     }
