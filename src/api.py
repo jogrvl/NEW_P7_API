@@ -1,34 +1,39 @@
-# src/api.py
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import pandas as pd
 import joblib
-import os
+from pathlib import Path
 
 # -----------------------------
 # Paramètres
 # -----------------------------
 THRESHOLD_METIER = 0.54
-BASE_DIR = os.path.dirname(__file__)
 
-# Pipeline
-MODEL_PATH = os.path.join(BASE_DIR, "..", "modele_pipeline.pkl")
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
 
-# Dataset
-DATA_PATH = os.path.join(BASE_DIR, "data", "train_df_sample.csv")
+MODEL_PATH = PROJECT_DIR / "models" / "modele_pipeline.pkl"
+DATA_PATH = PROJECT_DIR / "data" / "train_df_sample.csv"
+
+# -----------------------------
+# Vérifications fichiers
+# -----------------------------
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(f"❌ Modèle introuvable : {MODEL_PATH}")
+
+if not DATA_PATH.exists():
+    raise FileNotFoundError(f"❌ Dataset introuvable : {DATA_PATH}")
 
 # -----------------------------
 # Chargement modèle + données
 # -----------------------------
-if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError("❌ modele_pipeline.pkl introuvable à la racine du projet.")
-
 pipe = joblib.load(MODEL_PATH)
 
 df_clients = pd.read_csv(DATA_PATH)
+
 if "SK_ID_CURR" not in df_clients.columns:
-    raise KeyError("❌ La colonne 'SK_ID_CURR' est manquante dans le dataset chargé.")
+    raise KeyError("❌ La colonne 'SK_ID_CURR' est absente du dataset.")
+
 df_clients.set_index("SK_ID_CURR", inplace=True)
 
 ALL_COLUMNS = pipe.feature_names_in_
@@ -36,7 +41,11 @@ ALL_COLUMNS = pipe.feature_names_in_
 # -----------------------------
 # FastAPI
 # -----------------------------
-app = FastAPI(title="API Scoring Crédit P7", version="1.0")
+app = FastAPI(
+    title="API Scoring Crédit P7",
+    version="1.1",
+    description="API de prédiction de risque crédit à partir de SK_ID_CURR"
+)
 
 class ClientRequest(BaseModel):
     SK_ID_CURR: int
@@ -45,12 +54,13 @@ class ClientRequest(BaseModel):
 def root():
     return {"message": "API Scoring Crédit - OK"}
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 @app.get("/clients")
 def get_clients():
-    """
-    Retourne la liste des SK_ID_CURR disponibles
-    """
-    return df_clients.index.tolist()
+    return {"clients": df_clients.index.tolist()}
 
 @app.post("/predict")
 def predict(request: ClientRequest):
@@ -61,20 +71,20 @@ def predict(request: ClientRequest):
 
     client_data = df_clients.loc[client_id].to_dict()
 
-    # Crée l'input complet avec toutes les colonnes attendues par le pipeline
+    # Préparer toutes les colonnes attendues par le pipeline
     full_input = {col: 0.0 for col in ALL_COLUMNS}
-    for col in client_data:
+    for col, value in client_data.items():
         if col in ALL_COLUMNS:
-            full_input[col] = client_data[col]
+            full_input[col] = value
 
     df_input = pd.DataFrame([full_input])
 
     proba = float(pipe.predict_proba(df_input)[0][1])
-    decision = int(proba > THRESHOLD_METIER)
+    prediction = "Refusé" if proba > THRESHOLD_METIER else "Approuvé"
 
     return {
-        "client_id": client_id,
+        "client_id": int(client_id),
         "score_probabilite": round(proba, 4),
-        "decision": "Refusé" if decision == 1 else "Approuvé",
-        "seuil": THRESHOLD_METIER
+        "prediction": prediction,
+        "seuil_utilise": THRESHOLD_METIER
     }

@@ -1,3 +1,5 @@
-"train_df_cleaned.csv"
-"__pycache__/" 
-"*.pyc"  
+.venv/
+__pycache__/
+*.pyc
+models/*.pkl
+train_df_cleaned.csv
