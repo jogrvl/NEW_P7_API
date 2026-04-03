@@ -1,12 +1,17 @@
 import streamlit as st
-import requests
+# import requests
 import pandas as pd
+import joblib
 import plotly.express as px
 from pathlib import Path
 
 # ============================================================
 # CONFIGURATION GÉNÉRALE DE LA PAGE
 # ============================================================
+
+MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "modele_pipeline.pkl"
+pipe = joblib.load(MODEL_PATH)
+
 st.set_page_config(
     page_title="Dashboard Scoring Crédit",
     page_icon="📊",
@@ -14,7 +19,7 @@ st.set_page_config(
 )
 
 # URL de l'API locale
-API_URL = "http://127.0.0.1:8000/predict"
+# API_URL = "http://127.0.0.1:8000/predict"
 
 # Chemin vers le fichier de données clients
 DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "train_df_sample.csv"
@@ -200,43 +205,59 @@ st.markdown("---")
 # RÉSULTAT DU SCORING
 # ============================================================
 if launch_prediction:
-    payload = {"SK_ID_CURR": int(client_id)}
-
     try:
-        response = requests.post(API_URL, json=payload, timeout=20)
+        # On récupère la ligne du client sans l'identifiant
+        client_row = client_data.drop(columns=["SK_ID_CURR"])
 
-        if response.status_code == 200:
-            result = response.json()
+        # Colonnes attendues par le pipeline
+        model_columns = pipe.feature_names_in_
 
-            st.subheader("🎯 Résultat du scoring")
+        # Construire un input complet avec toutes les colonnes attendues
+        full_input = {col: 0.0 for col in model_columns}
+        for col in client_row.columns:
+            if col in model_columns:
+                full_input[col] = client_row.iloc[0][col]
 
-            col1, col2, col3 = st.columns(3)
+        # Transformer en DataFrame pour le modèle
+        df_input = pd.DataFrame([full_input])
 
-            with col1:
-                st.metric("ID Client", f"{result['client_id']}")
+        # Prédiction
+        proba = float(pipe.predict_proba(df_input)[0][1])
+        prediction = "Refusé" if proba > 0.54 else "Approuvé"
 
-            with col2:
-                st.metric(
-                    "Probabilité de défaut",
-                    f"{result['score_probabilite']:.2%}"
-                )
+        result = {
+            "client_id": int(client_id),
+            "score_probabilite": proba,
+            "prediction": prediction,
+            "seuil_utilise": 0.54
+        }
 
-            with col3:
-                st.metric(
-                    "Seuil utilisé",
-                    f"{result['seuil_utilise']:.2%}"
-                )
+        st.subheader("🎯 Résultat du scoring")
 
-            if result["prediction"] == "Approuvé":
-                st.success("✅ Décision estimée : Approuvé")
-            else:
-                st.error("❌ Décision estimée : Refusé")
+        col1, col2, col3 = st.columns(3)
 
+        with col1:
+            st.metric("ID Client", f"{result['client_id']}")
+
+        with col2:
+            st.metric(
+                "Probabilité de défaut",
+                f"{result['score_probabilite']:.2%}"
+            )
+
+        with col3:
+            st.metric(
+                "Seuil utilisé",
+                f"{result['seuil_utilise']:.2%}"
+            )
+
+        if result["prediction"] == "Approuvé":
+            st.success("✅ Décision estimée : Approuvé")
         else:
-            st.error(f"Erreur API : {response.status_code} - {response.text}")
+            st.error("❌ Décision estimée : Refusé")
 
     except Exception as e:
-        st.error(f"Erreur de connexion à l'API : {e}")
+        st.error(f"Erreur lors de la prédiction locale : {e}")
 
 else:
     st.info("Sélectionnez un client dans la barre latérale puis lancez la prédiction.")
